@@ -1,0 +1,12 @@
+2026/10/16-14:15:19.825 31333a Reusing MANIFEST /Users/omaralbertofloresreyes/bot-rec-hall/.wwebjs_auth/session-ecommerce-bot/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/10/16-14:15:19.825 31333a Recovering log #39
+2026/10/16-14:15:19.851 31333a Reusing old log /Users/omaralbertofloresreyes/bot-rec-hall/.wwebjs_auth/session-ecommerce-bot/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000039.log 
+2026/10/16-14:15:53.312 31333b Level-0 table #44: started
+2026/10/16-14:15:53.337 31333b Level-0 table #44: 1224280 bytes OK
+2026/10/16-14:15:53.341 31333b Delete type=0 #39
+2026/10/16-14:16:21.997 31333b Compacting 1@1 + 1@2 files
+2026/10/16-14:16:22.052 31333b Generated table #45@1: 53611 keys, 1839164 bytes
+2026/10/16-14:16:22.052 31333b Compacted 1@1 + 1@2 files => 1839164 bytes
+2026/10/16-14:16:22.055 31333b compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/10/16-14:16:22.056 31333b Delete type=2 #41
+2026/10/16-14:16:22.056 31333b Delete type=2 #44
