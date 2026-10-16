@@ -1,6 +1,11 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
+// Detectar automáticamente si estamos en Linux (EC2) o Mac
+const chromePath = process.platform === 'linux'
+    ? '/usr/bin/google-chrome-stable'
+    : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: process.env.CLIENT_ID || "ecommerce-bot" }),
     webVersionCache: {
@@ -8,7 +13,7 @@ const client = new Client({
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version-primary/main/html/2.2412.54.html',
     },
     puppeteer: {
-        executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        executablePath: chromePath,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
     }
 });
