@@ -1,7 +1,30 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { buscarArticulosEnDB, obtenerPromocionesActivas, obtenerPedidoPorId } = require('../services/dbService');
-const { obtenerRespuestaFAQ } = require('./faqHandler'); // <--- Importamos el manejador de FAQ
+const { obtenerRespuestaFAQ } = require('./faqHandler');
 const sessions = new Map();
+
+// --- CONTROL DE INACTIVIDAD (Auto-recordatorio sin consumo excesivo) ---
+// Revisa cada 5 minutos si algún usuario lleva más de 20 minutos inactivo en un submenú
+setInterval(async () => {
+    const ahora = Date.now();
+    for (const [chatId, sesion] of sessions.entries()) {
+        if (sesion.estado && sesion.estado !== 'MENU_PRINCIPAL' && !sesion.avisoInactivoEnviado) {
+            const tiempoInactivo = ahora - (sesion.lastInteraction || ahora);
+            const TIEMPO_LIMITE = 20 * 60 * 1000; // 20 minutos
+
+            if (tiempoInactivo > TIEMPO_LIMITE) {
+                try {
+                    // Nota: Usamos la importación del cliente de whatsapp de manera global en el archivo
+                    const clientInstance = require('../config/whatsapp');
+                    await clientInstance.sendMessage(chatId, "Hola, ¿sigues ahí? 😊 Veo que dejamos pendiente tu consulta. Escribe *MENU* para volver al inicio o continúa con lo que estabas haciendo.");
+                    sesion.avisoInactivoEnviado = true; // Marca para no repetir el aviso spam
+                } catch (err) {
+                    console.error("Error al enviar mensaje de inactividad:", err);
+                }
+            }
+        }
+    }
+}, 5 * 60 * 1000); // Se ejecuta cada 5 minutos
 
 async function handleIncomingMessage(msg, client) {
     try {
@@ -18,6 +41,12 @@ async function handleIncomingMessage(msg, client) {
         const textoLower = texto.toLowerCase();
         let sesion = sessions.get(chatId);
 
+        // Si el usuario escribe algo, actualizamos su última interacción y reseteamos el aviso de inactividad
+        if (sesion) {
+            sesion.lastInteraction = Date.now();
+            sesion.avisoInactivoEnviado = false;
+        }
+
         const respuestaFaq = obtenerRespuestaFAQ(textoLower);
         if (respuestaFaq) {
             await msg.reply(respuestaFaq);
@@ -31,13 +60,20 @@ async function handleIncomingMessage(msg, client) {
 
             sessions.set(chatId, {
                 nombreCliente: contact.pushname || "Cliente",
-                estado: 'MENU_PRINCIPAL'
+                estado: 'MENU_PRINCIPAL',
+                lastInteraction: Date.now(),
+                avisoInactivoEnviado: false
             });
             return;
         }
 
         if (textoLower === 'menu' || textoLower === 'inicio') {
             sesion.estado = 'MENU_PRINCIPAL';
+            // Limpiamos datos temporales de pedidos si existieran al volver al menú
+            delete sesion.pedidoTempId;
+            delete sesion.pedidoDatos;
+            delete sesion.subEstado;
+
             await msg.reply("🏠 *Menú Principal:*\n\n1️⃣ Buscar artículos o productos 🔍\n2️⃣ Ver Promociones vigentes 🔥\n3️⃣ Consultar estatus de mi pedido 📦\n4️⃣ Hablar con un asesor humano 💬\n\n_Escribe el número de tu opción:_");
             return;
         }
@@ -60,11 +96,9 @@ async function handleIncomingMessage(msg, client) {
 
                             if (promo.url_imagen) {
                                 try {
-                                    // Descarga y adjunta la imagen de la promo como componente multimedia
                                     const media = await MessageMedia.fromUrl(promo.url_imagen);
                                     await client.sendMessage(chatId, media, { caption: textoPromo });
                                 } catch (imgErr) {
-                                    // Si falla la imagen, mandamos solo el texto para no romper el flujo
                                     await client.sendMessage(chatId, textoPromo);
                                 }
                             } else {
@@ -101,11 +135,9 @@ async function handleIncomingMessage(msg, client) {
                 const frontendURL = process.env.FRONTEND_URL || 'https://comcorr.com.mx';
 
                 if (articulosEncontrados.length > 0) {
-                    // Creamos un solo mensaje agrupado limpio
                     let respuestaUnica = `📦 *Resultados para "${texto}":*\n\n`;
 
                     articulosEncontrados.forEach((art, idx) => {
-                        // Generamos el slug amigable para el enlace del producto
                         const slug = art.descripcion
                             .toLowerCase()
                             .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -123,22 +155,23 @@ async function handleIncomingMessage(msg, client) {
                     });
 
                     respuestaUnica += "_¿Buscas algo más? Escribe otro término o *MENU* para volver al inicio._";
-
-                    // Enviamos todo en una sola burbuja ordenada
                     await msg.reply(respuestaUnica);
 
                 } else {
                     await msg.reply(`❌ No encontramos artículos que coincidan con "${texto}". Intenta con otra palabra clave o escribe *MENU* para regresar.`);
                 }
                 break;
+
             case 'CONSULTANDO_PEDIDO':
                 if (textoLower === 'menu') {
                     sesion.estado = 'MENU_PRINCIPAL';
+                    delete sesion.pedidoTempId;
+                    delete sesion.pedidoDatos;
+                    delete sesion.subEstado;
                     await msg.reply("Regresamos al menú principal.");
                     break;
                 }
 
-                // Sub-estado 1: Si aún no tenemos el ID del pedido guardado en la sesión temporal
                 if (!sesion.pedidoTempId) {
                     const numeroPedido = texto.replace(/\D/g, '');
                     if (!numeroPedido) {
@@ -146,14 +179,12 @@ async function handleIncomingMessage(msg, client) {
                         return;
                     }
 
-                    // Buscamos si existe el pedido primero
                     const pedido = await obtenerPedidoPorId(numeroPedido);
                     if (!pedido) {
                         await msg.reply(`❌ No encontramos ningún pedido con el ID #${numeroPedido}. Verifica el número o escribe *MENU*.`);
                         return;
                     }
 
-                    // Guardamos temporalmente el ID y pasamos a pedir validación de seguridad (ej. Correo o Teléfono)
                     sesion.pedidoTempId = numeroPedido;
                     sesion.pedidoDatos = pedido;
                     sesion.subEstado = 'VALIDANDO_IDENTIDAD';
@@ -162,14 +193,11 @@ async function handleIncomingMessage(msg, client) {
                     break;
                 }
 
-                // Sub-estado 2: Validar la identidad con el dato proporcionado
                 if (sesion.subEstado === 'VALIDANDO_IDENTIDAD') {
                     const correoIngresado = texto.trim().toLowerCase();
                     const pedido = sesion.pedidoDatos;
 
-                    // Validamos si el correo coincide con el registrado en la BD para ese pedido
                     if (pedido.correo_usuario && pedido.correo_usuario.toLowerCase() === correoIngresado) {
-                        // ¡Identidad confirmada! Mostramos el pedido completo
                         let respuesta = `✅ *¡Identidad confirmada!*\n\n📦 *Detalle del Pedido #${pedido.pedido_id}*\n\n`;
                         respuesta += `📅 *Fecha:* ${new Date(pedido.fecha_venta).toLocaleDateString()}\n`;
                         respuesta += `🏢 *Sucursal:* ${pedido.sucursal}\n`;
@@ -184,7 +212,6 @@ async function handleIncomingMessage(msg, client) {
 
                         respuesta += `\n_Escribe *MENU* para volver al inicio._`;
 
-                        // Limpiamos las variables temporales de validación
                         delete sesion.pedidoTempId;
                         delete sesion.pedidoDatos;
                         delete sesion.subEstado;
@@ -192,11 +219,11 @@ async function handleIncomingMessage(msg, client) {
 
                         await msg.reply(respuesta);
                     } else {
-                        // Si falla la validación
                         await msg.reply("❌ El correo no coincide con el registrado en este pedido. Inténtalo de nuevo o escribe *MENU* para volver al inicio.");
                     }
                 }
                 break;
+
             case 'ATENCION_HUMANA':
                 if (textoLower === 'menu') {
                     sesion.estado = 'MENU_PRINCIPAL';

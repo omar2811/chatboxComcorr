@@ -36,6 +36,24 @@ client.on('message', async msg => {
     await handleIncomingMessage(msg, client);
 });
 
+// --- MANEJADORES DE ESTADO Y AUTO-RECONEXIÓN PARA EVITAR QUE SE DUERMA ---
+client.on('auth_failure', msg => {
+    console.error('❌ Error de autenticación en WhatsApp:', msg);
+});
+
+client.on('disconnected', async (reason) => {
+    console.log('⚠️ Cliente de WhatsApp desconectado por:', reason);
+    try {
+        await client.destroy();
+        console.log('🔄 Reiniciando sesión y reconectando cliente automáticamente...');
+        setTimeout(() => {
+            client.initialize();
+        }, 5000);
+    } catch (err) {
+        console.error('Error al intentar reiniciar el cliente:', err);
+    }
+});
+
 // --- INICIAR SERVIDOR Y CLIENTE ---
 app.listen(PORT, () => {
     console.log(`🚀 Servidor HTTP E-commerce corriendo en puerto ${PORT}`);
